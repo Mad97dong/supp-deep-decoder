@@ -38,32 +38,32 @@ def fit(net,
         mask_var = None,
         apply_f = None,
         lr_decay_epoch = 0,
-        net_input = None,
-        net_input_gen = "random",
+        z = None,
+        z_gen = "random",
         find_best=False,
         weight_decay=0,
        ):
 
-    if net_input is not None:
+    if z is not None:
         print("input provided")
     else:
-        # feed uniform noise into the network 
+        # feed uniform noise z into the network 
         totalupsample = 2**len(num_channels)
         width = int(img_clean_var.data.shape[2]/totalupsample)
         height = int(img_clean_var.data.shape[3]/totalupsample)
         shape = [1,num_channels[0], width, height]
         print("shape: ", shape)
-        net_input = Variable(torch.zeros(shape))
-        net_input.data.uniform_()
-        net_input.data *= 1./10
+        z = Variable(torch.zeros(shape))
+        z.data.uniform_()
+        z.data *= 1./10
 
-    net_input_saved = net_input.data.clone()
-    noise = net_input.data.clone()
+    z_saved = z.data.clone()
+    noise = z.data.clone()
     p = [x for x in net.parameters() ]
 
     if(opt_input == True): # optimizer over the input as well
-        net_input.requires_grad = True
-        p += [net_input]
+        z.requires_grad = True
+        p += [z]
 
     mse_wrt_noisy = np.zeros(num_iter)
     mse_wrt_truth = np.zeros(num_iter)
@@ -89,35 +89,38 @@ def fit(net,
         
         if lr_decay_epoch is not 0:
             optimizer = exp_lr_scheduler(optimizer, i, init_lr=LR, lr_decay_epoch=lr_decay_epoch)
-        if reg_noise_std > 0:
-            if i % reg_noise_decayevery == 0:
-                reg_noise_std *= 0.7
-            net_input = Variable(net_input_saved + (noise.normal_() * reg_noise_std))
+            
+#         if reg_noise_std > 0:
+#             if i % reg_noise_decayevery == 0:
+#                 reg_noise_std *= 0.7
+#             z = Variable(z_saved + (noise.normal_() * reg_noise_std)) # fix z
         
+        
+        # def of closure
         def closure():
             optimizer.zero_grad()
-            out = net(net_input.type(dtype))
+            out = net(z.type(dtype)) # output of network
 
             # training loss 
             if mask_var is not None:
-                loss = mse( out * mask_var , img_noisy_var * mask_var )
+                loss = mse(out * mask_var, img_noisy_var * mask_var )
             elif apply_f:
-                loss = mse( apply_f(out) , img_noisy_var )
+                loss = mse(apply_f(out), img_noisy_var )
             else:
                 loss = mse(out, img_noisy_var)
         
             loss.backward()
             mse_wrt_noisy[i] = loss.data.cpu().numpy()
             
-            
             # the actual loss 
             true_loss = mse(Variable(out.data, requires_grad=False), img_clean_var)
             mse_wrt_truth[i] = true_loss.data.cpu().numpy()
             if i % 10 == 0:
-                out2 = net(Variable(net_input_saved).type(dtype))
+                out2 = net(Variable(z_saved).type(dtype))
                 loss2 = mse(out2, img_clean_var)
-                print ('Iteration %05d    Train loss %f  Actual loss %f Actual loss orig %f  Noise Energy %f' % (i, loss.data,true_loss.data,loss2.data,noise_energy.data), '\r', end='')
+                print ('Iteration %05d    Train loss %f  Actual loss %f Actual loss orig %f  Noise Energy %f' % (i, loss.data, true_loss.data, loss2.data, noise_energy.data), '\r', end='')
             return loss
+        # end of closure
 
         
         #if OPTIMIZER == 'LBFGS':
@@ -125,8 +128,6 @@ def fit(net,
         #        optimizer = torch.optim.Adam(p, lr=LR)
         #    else:
         #        optimizer = torch.optim.LBFGS(p, lr=LR)
-        
-        
         loss = optimizer.step(closure)
             
         if find_best:
@@ -138,8 +139,7 @@ def fit(net,
         
     if find_best:
         net = best_net
-    return mse_wrt_noisy, mse_wrt_truth,net_input_saved, net
-
+    return mse_wrt_noisy, mse_wrt_truth,z_saved, net
 
 
 
